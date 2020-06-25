@@ -6,6 +6,7 @@ const Filter = require('bad-words')
 const { generateMessage, generateLocationMessage } = require('./utils/messages')
 const { addUser, removeUser, getUser, getUsersInRoom } = require('./utils/users')
 
+
 const app = express()
 const server = http.createServer(app)
 const io = socketio(server)
@@ -16,9 +17,12 @@ const publicDirectoryPath = path.join(__dirname, '../public')
 
 app.use(express.static(publicDirectoryPath))
 
+const activeRooms = []
 
 io.on('connection', (socket) => {
     console.log('New WebSocket connection')
+
+    io.emit('activeRooms', activeRooms)
 
     socket.on('join', (options, callback) => {
         const { error, user } = addUser({ id: socket.id, ...options })
@@ -27,8 +31,15 @@ io.on('connection', (socket) => {
             return callback(error)
         }
 
-        socket.join(user.room)
+        socket.join(user.room)   
+
+        const newRoom = activeRooms.every(room => room !== user.room)
         
+        if (newRoom) {
+            activeRooms.push(user.room)
+            io.emit('activeRooms', activeRooms)
+        } 
+
         socket.emit('message', generateMessage('Admin', 'Welcome!'))
         socket.broadcast.to(user.room).emit('message', generateMessage('Admin', `${user.username} has joined!`)) 
         io.to(user.room).emit('roomData', {
@@ -61,6 +72,13 @@ io.on('connection', (socket) => {
         const user = removeUser(socket.id)
 
         if (user) {
+            const index = activeRooms.findIndex(room => room === user.room)
+
+            if (getUsersInRoom(activeRooms[index]).length <= 0) {
+                activeRooms.splice(index, 1)
+                io.emit('activeRooms', activeRooms)
+            }
+
             io.to(user.room).emit('message', generateMessage('Admin', `${user.username} has left!`)) 
             io.to(user.room).emit('roomData', {
                 room: user.room,
